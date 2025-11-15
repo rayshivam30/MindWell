@@ -177,15 +177,12 @@ ratelimit:{endpoint}:{ip}          # Rate limiting counters
 ```bash
 # Frontend tests
 pnpm test
-pnpm test:coverage
 
 # Backend tests
 cd backend && pnpm test
-pnpm test:watch
-pnpm test:integration
 
-# All tests
-pnpm test && cd backend && pnpm test
+# All tests with coverage
+pnpm test:coverage && cd backend && pnpm test:coverage
 ```
 
 ### Code Quality
@@ -211,10 +208,14 @@ cd docs && pnpm build
 ```bash
 # Backend build
 cd backend && pnpm build
-
-# Frontend build
-pnpm build
 ```
+
+### Simple Deployment
+For simple deployment, you can use:
+- **Backend**: Deploy to Railway, Render, or Heroku
+- **Frontend**: Use Expo for mobile app distribution
+- **Database**: Firebase Firestore (already configured)
+- **Cache**: Redis Cloud or Railway Redis
 
 ### Environment Variables
 

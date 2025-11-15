@@ -10,7 +10,6 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "backend": "cd backend && pnpm run dev",
-    "install-all": "pnpm install",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch --passWithNoTests",
     "test:coverage": "jest --coverage --passWithNoTests",
@@ -18,15 +17,7 @@
     "lint:fix": "eslint src/**/*.{ts,tsx} --fix",
     "type-check": "tsc --noEmit || true",
     "docs:dev": "cd docs && pnpm dev",
-    "docs:build": "cd docs && pnpm build",
-    "docs:preview": "cd docs && pnpm preview",
-    "build:web": "expo export:web || echo 'Web build not configured'",
-    "docker:build": "docker-compose build",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:logs": "docker-compose logs -f",
-    "k8s:deploy": "kubectl apply -f k8s/",
-    "k8s:delete": "kubectl delete -f k8s/"
+    "docs:build": "cd docs && pnpm build"
   },
   "dependencies": {
     "@expo/vector-icons": "^13.0.0",
