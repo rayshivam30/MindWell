@@ -1,0 +1,370 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18'
+  PNPM_VERSION: '8'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Build and Push Docker Images
+  docker:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'push'
+    
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-image: ${{ steps.meta-backend.outputs.tags }}
+      frontend-image: ${{ steps.meta-frontend.outputs.tags }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Backend Docker Build
+      - name: Extract backend metadata
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Frontend Docker Build (for web deployment)
+      - name: Extract frontend metadata
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.web
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 2: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+    
+    environment:
+      name: staging
+      url: https://staging.mindwell.app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+      - name: Deploy to staging
+        run: |
+          # Update deployment with new image
+          kubectl set image deployment/mindwell-backend-staging \
+            backend=${{ needs.docker.outputs.backend-image }} \
+            -n staging
+          
+          kubectl set image deployment/mindwell-frontend-staging \
+            frontend=${{ needs.docker.outputs.frontend-image }} \
+            -n staging
+          
+          # Wait for rollout to complete
+          kubectl rollout status deployment/mindwell-backend-staging -n staging --timeout=300s
+          kubectl rollout status deployment/mindwell-frontend-staging -n staging --timeout=300s
+
+      - name: Run smoke tests
+        run: |
+          # Wait for services to be ready
+          sleep 30
+          
+          # Test backend health endpoint
+          curl -f https://api-staging.mindwell.app/health || exit 1
+          
+          # Test frontend
+          curl -f https://staging.mindwell.app || exit 1
+
+  # Job 3: Deploy Documentation
+  deploy-docs:
+    name: Deploy Documentation
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install documentation dependencies
+        run: cd docs && pnpm install --frozen-lockfile
+
+      - name: Build documentation
+        run: cd docs && pnpm build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload documentation
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: docs/.vitepress/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  # Job 4: Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker, deploy-staging]
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    environment:
+      name: production
+      url: https://mindwell.app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+      - name: Deploy to production
+        run: |
+          # Update deployment with new image
+          kubectl set image deployment/mindwell-backend-prod \
+            backend=${{ needs.docker.outputs.backend-image }} \
+            -n production
+          
+          kubectl set image deployment/mindwell-frontend-prod \
+            frontend=${{ needs.docker.outputs.frontend-image }} \
+            -n production
+          
+          # Wait for rollout to complete
+          kubectl rollout status deployment/mindwell-backend-prod -n production --timeout=600s
+          kubectl rollout status deployment/mindwell-frontend-prod -n production --timeout=600s
+
+      - name: Run production smoke tests
+        run: |
+          # Wait for services to be ready
+          sleep 60
+          
+          # Test backend health endpoint
+          curl -f https://api.mindwell.app/health || exit 1
+          
+          # Test frontend
+          curl -f https://mindwell.app || exit 1
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## Changes in this Release
+            - Automated deployment from CI/CD pipeline
+            - Backend image: ${{ needs.docker.outputs.backend-image }}
+            - Frontend image: ${{ needs.docker.outputs.frontend-image }}
+            
+            ## Deployment Status
+            - ✅ Staging deployment successful
+            - ✅ Production deployment successful
+            - ✅ Smoke tests passed
+          draft: false
+          prerelease: false
+
+  # Job 5: Mobile App Build (React Native)
+  mobile-build:
+    name: Build Mobile Apps
+    runs-on: ubuntu-latest
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    strategy:
+      matrix:
+        platform: [android, ios]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Expo CLI
+        run: pnpm add -g @expo/cli
+
+      - name: Build Android APK
+        if: matrix.platform == 'android'
+        run: |
+          expo build:android --type apk --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build iOS IPA
+        if: matrix.platform == 'ios'
+        run: |
+          expo build:ios --type archive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  # Job 6: Notification and Monitoring
+  notify-deployment:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-docs, deploy-production]
+    if: always()
+
+    steps:
+      - name: Notify Slack on Success
+        if: ${{ needs.deploy-production.result == 'success' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#deployments'
+          message: |
+            🚀 *MindWell Production Deployment Successful!*
+            
+            *Tag:* ${{ github.ref }}
+            *Commit:* ${{ github.sha }}
+            *Author:* ${{ github.actor }}
+            
+            *Services Deployed:*
+            • Backend API: ✅
+            • Frontend Web: ✅
+            • Documentation: ✅
+            
+            *Links:*
+            • Production: https://mindwell.app
+            • API: https://api.mindwell.app
+            • Docs: https://docs.mindwell.app
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack on Failure
+        if: ${{ needs.deploy-production.result == 'failure' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#deployments'
+          message: |
+            ❌ *MindWell Production Deployment Failed!*
+            
+            *Tag:* ${{ github.ref }}
+            *Commit:* ${{ github.sha }}
+            *Author:* ${{ github.actor }}
+            
+            Please check the GitHub Actions logs for details.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

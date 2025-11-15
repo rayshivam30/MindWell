@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+web-build/
+.expo/
+coverage/
+
+# Generated files
+*.min.js
+*.min.css
+
+# Package files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Git
+.git/
+
+# Documentation build
+docs/.vitepress/dist/
+docs/.vitepress/cache/

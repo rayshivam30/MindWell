@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindwell-redis
+  labels:
+    app: mindwell-redis
+    component: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mindwell-redis
+  template:
+    metadata:
+      labels:
+        app: mindwell-redis
+        component: cache
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mindwell-secrets
+              key: redis-password
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - --no-auth-warning
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - --no-auth-warning
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 999
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-pvc
+      securityContext:
+        fsGroup: 999
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mindwell-redis-service
+  labels:
+    app: mindwell-redis
+spec:
+  selector:
+    app: mindwell-redis
+  ports:
+  - protocol: TCP
+    port: 6379
+    targetPort: 6379
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-pvc
+  labels:
+    app: mindwell-redis
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp2

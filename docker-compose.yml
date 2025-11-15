@@ -1,0 +1,83 @@
+# Docker Compose for local development
+version: '3.8'
+
+services:
+  # Redis service
+  redis:
+    image: redis:7-alpine
+    container_name: mindwell-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend service
+  backend:
+    build:
+      context: ./backend
+      target: development
+    container_name: mindwell-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-jwt-secret-key
+      - FIREBASE_SERVICE_ACCOUNT_KEY={"type":"service_account","project_id":"mindwell-dev"}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Frontend web service (for development)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: development
+    container_name: mindwell-frontend
+    ports:
+      - "19006:19006"
+    environment:
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Documentation service
+  docs:
+    build:
+      context: ./docs
+      dockerfile: Dockerfile
+    container_name: mindwell-docs
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./docs:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+    name: mindwell-network

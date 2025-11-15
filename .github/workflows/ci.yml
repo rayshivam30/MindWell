@@ -1,0 +1,350 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '18'
+  PNPM_VERSION: '8'
+
+jobs:
+  # Job 1: Code Quality and Linting
+  lint:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend dependencies
+        run: cd backend && pnpm install --frozen-lockfile
+
+      - name: Lint frontend code
+        run: pnpm lint
+
+      - name: Lint backend code
+        run: cd backend && pnpm lint
+
+      - name: Check TypeScript types (frontend)
+        run: pnpm type-check
+
+      - name: Check TypeScript types (backend)
+        run: cd backend && pnpm type-check
+
+      - name: Check code formatting
+        run: |
+          pnpm prettier --check "src/**/*.{ts,tsx,js,jsx,json,md}"
+          cd backend && pnpm prettier --check "src/**/*.{ts,js,json,md}"
+
+  # Job 2: Frontend Tests
+  test-frontend:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: pnpm test:coverage
+
+      - name: Upload frontend coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+          fail_ci_if_error: false
+
+      - name: Upload frontend coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-coverage-report
+          path: coverage/
+
+  # Job 3: Backend Tests
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install backend dependencies
+        run: cd backend && pnpm install --frozen-lockfile
+
+      - name: Run backend unit tests
+        run: cd backend && pnpm test:coverage
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-key-for-ci
+          FIREBASE_SERVICE_ACCOUNT_KEY: '{"type":"service_account","project_id":"test"}'
+
+      - name: Run backend integration tests
+        run: cd backend && pnpm test:integration
+        env:
+          NODE_ENV: test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-jwt-secret-key-for-ci
+          FIREBASE_SERVICE_ACCOUNT_KEY: '{"type":"service_account","project_id":"test"}'
+
+      - name: Upload backend coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./backend/coverage/lcov.info
+          flags: backend
+          name: backend-coverage
+          fail_ci_if_error: false
+
+      - name: Upload backend coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-coverage-report
+          path: backend/coverage/
+
+  # Job 4: Security Scanning
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend dependencies
+        run: cd backend && pnpm install --frozen-lockfile
+
+      - name: Run security audit (frontend)
+        run: pnpm audit --audit-level moderate
+
+      - name: Run security audit (backend)
+        run: cd backend && pnpm audit --audit-level moderate
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # Job 5: Build Verification
+  build:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    needs: [test-frontend, test-backend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install backend dependencies
+        run: cd backend && pnpm install --frozen-lockfile
+
+      - name: Build backend
+        run: cd backend && pnpm build
+
+      - name: Build documentation
+        run: cd docs && pnpm install --frozen-lockfile && pnpm build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            backend/dist/
+            docs/.vitepress/dist/
+
+  # Job 6: Documentation Build
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install documentation dependencies
+        run: cd docs && pnpm install --frozen-lockfile
+
+      - name: Build documentation
+        run: cd docs && pnpm build
+
+      - name: Upload documentation artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation
+          path: docs/.vitepress/dist/
+
+  # Job 7: Notification
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [build, security, docs]
+    if: always()
+
+    steps:
+      - name: Notify success
+        if: ${{ needs.build.result == 'success' && needs.security.result == 'success' && needs.docs.result == 'success' }}
+        run: |
+          echo "✅ All CI checks passed successfully!"
+          echo "- Code quality: ✅"
+          echo "- Frontend tests: ✅"
+          echo "- Backend tests: ✅"
+          echo "- Security scan: ✅"
+          echo "- Build verification: ✅"
+          echo "- Documentation: ✅"
+
+      - name: Notify failure
+        if: ${{ needs.build.result == 'failure' || needs.security.result == 'failure' || needs.docs.result == 'failure' }}
+        run: |
+          echo "❌ CI pipeline failed!"
+          echo "- Build result: ${{ needs.build.result }}"
+          echo "- Security result: ${{ needs.security.result }}"
+          echo "- Documentation result: ${{ needs.docs.result }}"
+          exit 1

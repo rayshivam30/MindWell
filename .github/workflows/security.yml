@@ -1,0 +1,234 @@
+name: Security Scanning
+
+on:
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Job 1: Dependency Vulnerability Scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: '8'
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          cd backend && pnpm install --frozen-lockfile
+
+      - name: Run npm audit (frontend)
+        run: pnpm audit --audit-level moderate
+        continue-on-error: true
+
+      - name: Run npm audit (backend)
+        run: cd backend && pnpm audit --audit-level moderate
+        continue-on-error: true
+
+      - name: Run Snyk vulnerability scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+        continue-on-error: true
+
+  # Job 2: Code Security Analysis
+  code-security:
+    name: Code Security Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+      - name: Run Semgrep security scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/javascript
+            p/typescript
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  # Job 3: Docker Image Security Scanning
+  docker-security:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false
+          tags: mindwell-backend:scan
+          load: true
+
+      - name: Run Trivy vulnerability scanner (backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'mindwell-backend:scan'
+          format: 'sarif'
+          output: 'backend-trivy-results.sarif'
+
+      - name: Upload Trivy scan results (backend)
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'backend-trivy-results.sarif'
+          category: 'backend-container'
+
+      - name: Build frontend image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.web
+          push: false
+          tags: mindwell-frontend:scan
+          load: true
+
+      - name: Run Trivy vulnerability scanner (frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'mindwell-frontend:scan'
+          format: 'sarif'
+          output: 'frontend-trivy-results.sarif'
+
+      - name: Upload Trivy scan results (frontend)
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'frontend-trivy-results.sarif'
+          category: 'frontend-container'
+
+  # Job 4: Infrastructure Security
+  infrastructure-security:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov (Infrastructure as Code security)
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile,kubernetes
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: checkov-results.sarif
+          category: 'infrastructure'
+
+      - name: Run kube-score (Kubernetes security)
+        run: |
+          wget https://github.com/zegl/kube-score/releases/download/v1.16.1/kube-score_1.16.1_linux_amd64.tar.gz
+          tar xzf kube-score_1.16.1_linux_amd64.tar.gz
+          ./kube-score score k8s/*.yaml
+
+  # Job 5: Secrets Scanning
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog secrets scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Run GitLeaks secrets scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 6: Security Report
+  security-report:
+    name: Security Report
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, code-security, docker-security, infrastructure-security, secrets-scan]
+    if: always()
+
+    steps:
+      - name: Generate security summary
+        run: |
+          echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Code Security: ${{ needs.code-security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Docker Security: ${{ needs.docker-security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure Security: ${{ needs.infrastructure-security.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Secrets Scan: ${{ needs.secrets-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review any security findings in the Security tab" >> $GITHUB_STEP_SUMMARY
+          echo "2. Address high and critical vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "3. Update dependencies regularly" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify security team on critical findings
+        if: ${{ needs.dependency-scan.result == 'failure' || needs.code-security.result == 'failure' }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#security'
+          message: |
+            🚨 *Critical Security Findings Detected*
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            
+            Please review the security findings immediately.
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_SLACK_WEBHOOK_URL }}

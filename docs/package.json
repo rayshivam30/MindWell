@@ -1,0 +1,13 @@
+{
+  "name": "mental-health-app-docs",
+  "version": "1.0.0",
+  "description": "Documentation for Mental Health App",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0-rc.31"
+  }
+}
