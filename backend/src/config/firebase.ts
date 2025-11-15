@@ -11,10 +11,15 @@ export const initializeFirebase = async () => {
         ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
         : require('../../firebase-service-account.json'); // Fallback for development
 
-      admin.initializeApp({
+      const config: any = {
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
-      });
+      };
+      
+      if (process.env.FIREBASE_DATABASE_URL) {
+        config.databaseURL = process.env.FIREBASE_DATABASE_URL;
+      }
+      
+      admin.initializeApp(config);
     }
 
     db = admin.firestore();

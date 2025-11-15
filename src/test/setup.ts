@@ -1,5 +1,13 @@
-import React from 'react';
-import '@testing-library/jest-native/extend-expect';
+import 'react-native-gesture-handler/jestSetup';
+
+// Mock React Native modules
+import { NativeModules } from 'react-native';
+
+NativeModules.RNCNetInfo = {
+  getCurrentState: jest.fn(() => Promise.resolve()),
+  addListener: jest.fn(),
+  removeListeners: jest.fn(),
+};
 
 // Mock React Native modules
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');

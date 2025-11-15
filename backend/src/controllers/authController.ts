@@ -13,7 +13,12 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 // Generate JWT token
 const generateToken = (payload: JWTPayload): string => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const secret = JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not defined');
+  }
+  // @ts-ignore - JWT library type issue
+  return jwt.sign(payload, secret, { expiresIn: JWT_EXPIRES_IN });
 };
 
 // Generate verification code
@@ -21,7 +26,7 @@ const generateVerificationCode = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-export const register = async (req: Request, res: Response) => {
+export const register = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { name, email, password, userType }: SignupRequest = req.body;
     const db = getFirestore();
@@ -84,17 +89,17 @@ export const register = async (req: Request, res: Response) => {
     };
 
     logger.info(`User registered: ${email}`);
-    res.status(201).json(response);
+    return res.status(201).json(response);
 
   } catch (error) {
     logger.error('Registration error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during registration'
     });
   }
 };
 
-export const login = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { email, password }: LoginRequest = req.body;
     const db = getFirestore();
@@ -112,6 +117,11 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const userDoc = userQuery.docs[0];
+    if (!userDoc) {
+      return res.status(401).json({
+        message: 'Invalid email or password'
+      });
+    }
     const userData = userDoc.data();
 
     // Verify password
@@ -146,17 +156,17 @@ export const login = async (req: Request, res: Response) => {
     };
 
     logger.info(`User logged in: ${email}`);
-    res.json(response);
+    return res.json(response);
 
   } catch (error) {
     logger.error('Login error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during login'
     });
   }
 };
 
-export const logout = async (req: Request, res: Response) => {
+export const logout = async (req: Request, res: Response): Promise<Response> => {
   try {
     const userId = (req as any).user.userId;
 
@@ -164,17 +174,17 @@ export const logout = async (req: Request, res: Response) => {
     await redisUtils.deleteSession(userId);
 
     logger.info(`User logged out: ${userId}`);
-    res.json({ message: 'Logout successful' });
+    return res.json({ message: 'Logout successful' });
 
   } catch (error) {
     logger.error('Logout error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during logout'
     });
   }
 };
 
-export const verifyEmail = async (req: Request, res: Response) => {
+export const verifyEmail = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { code } = req.body;
     const authHeader = req.headers.authorization;
@@ -212,20 +222,20 @@ export const verifyEmail = async (req: Request, res: Response) => {
     const { password: _, ...userWithoutPassword } = userData!;
 
     logger.info(`Email verified for user: ${userId}`);
-    res.json({
+    return res.json({
       user: userWithoutPassword,
       message: 'Email verified successfully'
     });
 
   } catch (error) {
     logger.error('Email verification error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during email verification'
     });
   }
 };
 
-export const forgotPassword = async (req: Request, res: Response) => {
+export const forgotPassword = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { email } = req.body;
     const db = getFirestore();
@@ -244,6 +254,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
     }
 
     const userDoc = userQuery.docs[0];
+    if (!userDoc) {
+      return res.json({
+        message: 'If an account with that email exists, we have sent a password reset link.'
+      });
+    }
     const userData = userDoc.data();
 
     // Generate reset token
@@ -254,19 +269,19 @@ export const forgotPassword = async (req: Request, res: Response) => {
     await sendPasswordResetEmail(email, userData.name, resetToken);
 
     logger.info(`Password reset requested for: ${email}`);
-    res.json({
+    return res.json({
       message: 'If an account with that email exists, we have sent a password reset link.'
     });
 
   } catch (error) {
     logger.error('Forgot password error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during password reset request'
     });
   }
 };
 
-export const resetPassword = async (req: Request, res: Response) => {
+export const resetPassword = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { token, newPassword } = req.body;
     const db = getFirestore();
@@ -307,13 +322,13 @@ export const resetPassword = async (req: Request, res: Response) => {
     await redisUtils.deleteSession(targetUserId);
 
     logger.info(`Password reset completed for user: ${targetUserId}`);
-    res.json({
+    return res.json({
       message: 'Password reset successful. Please log in with your new password.'
     });
 
   } catch (error) {
     logger.error('Reset password error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during password reset'
     });
   }
@@ -338,14 +353,14 @@ export const continueAsGuest = async (req: Request, res: Response) => {
     }, 86400); // 24 hours
 
     logger.info(`Guest session created: ${guestId}`);
-    res.json({
+    return res.json({
       guestToken,
       message: 'Guest session created successfully'
     });
 
   } catch (error) {
     logger.error('Guest session error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       message: 'Internal server error during guest session creation'
     });
   }

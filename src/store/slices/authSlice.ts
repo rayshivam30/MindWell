@@ -70,7 +70,7 @@ export const verifyEmail = createAsyncThunk(
   async (verificationCode: string, { rejectWithValue }) => {
     try {
       const response = await authAPI.verifyEmail(verificationCode);
-      return response.user;
+      return response; // Return the whole response
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Email verification failed');
     }

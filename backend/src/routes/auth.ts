@@ -12,7 +12,7 @@ import {
 import { validateRequest } from '../middleware/validateRequest';
 import { authMiddleware } from '../middleware/authMiddleware';
 
-const router = express.Router();
+const router: express.Router = express.Router();
 
 // Validation rules
 const registerValidation = [
