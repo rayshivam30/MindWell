@@ -1,73 +1,55 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { redisUtils } from '../config/redis';
-import { logger } from '../utils/logger';
-import { JWTPayload } from '../types/auth';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+export interface AuthenticatedRequest extends Request {
+  user?: {
+    uid: string;
+    email: string;
+    userType: 'patient' | 'therapist';
+  };
+}
 
-export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+export const authMiddleware = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
+    const token = req.header('Authorization')?.replace('Bearer ', '');
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ message: 'No token provided' });
+    if (!token) {
+      res.status(401).json({ message: 'Access denied. No token provided.' });
+      return;
     }
 
-    const token = authHeader.substring(7);
-
-    // Verify JWT token
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
-
-    // Check if session exists in Redis
-    const session = await redisUtils.getSession(decoded.userId);
-    if (!session) {
-      return res.status(401).json({ message: 'Session expired' });
+    // Check if token is blacklisted
+    const isBlacklisted = await redisUtils.exists(`blacklist:${token}`);
+    if (isBlacklisted) {
+      res.status(401).json({ message: 'Token has been invalidated.' });
+      return;
     }
 
-    // Add user info to request object
-    (req as any).user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      userType: decoded.userType,
-      isGuest: session.isGuest || false,
-    };
-
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    req.user = decoded;
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-    
-    logger.error('Auth middleware error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(401).json({ message: 'Invalid token.' });
   }
 };
 
-// Middleware to check if user is verified
-export const requireVerifiedEmail = (req: Request, res: Response, next: NextFunction) => {
-  const user = (req as any).user;
-  
-  if (user.isGuest) {
-    return next(); // Guests don't need email verification
-  }
-
-  // This would require fetching user data from database to check isEmailVerified
-  // For now, we'll assume the token is only issued to verified users after verification
-  next();
-};
-
-// Middleware to check user type
-export const requireUserType = (allowedTypes: ('patient' | 'therapist')[]) => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const user = (req as any).user;
-    
-    if (!allowedTypes.includes(user.userType)) {
-      return res.status(403).json({ 
-        message: 'Access denied. Insufficient permissions.' 
-      });
+export const requireUserType = (userType: 'patient' | 'therapist') => {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ message: 'Authentication required.' });
+      return;
     }
-    
+
+    if (req.user.userType !== userType) {
+      res.status(403).json({ message: `Access denied. ${userType} role required.` });
+      return;
+    }
+
     next();
   };
 };

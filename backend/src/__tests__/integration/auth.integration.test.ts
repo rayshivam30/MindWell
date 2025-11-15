@@ -2,8 +2,8 @@ import request from 'supertest';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import authRoutes from '../routes/auth';
-import { errorHandler } from '../middleware/errorHandler';
+import authRoutes from '../../routes/auth';
+import { errorHandler } from '../../middleware/errorHandler';
 
 // Create test app similar to main server
 const createTestApp = () => {

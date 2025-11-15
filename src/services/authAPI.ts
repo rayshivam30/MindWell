@@ -1,68 +1,31 @@
 import axios from 'axios';
 import { LoginCredentials, SignupData, AuthResponse } from '../types/auth';
 
-const API_BASE_URL = __DEV__ 
-  ? 'http://localhost:3000/api' 
-  : 'https://your-production-api.com/api';
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor to add auth token
-api.interceptors.request.use((config) => {
-  // Token will be added by Redux middleware when available
-  return config;
-});
-
-// Response interceptor for error handling
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // Handle token expiration
-      // This will be handled by Redux middleware
-    }
-    return Promise.reject(error);
-  }
-);
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 export const authAPI = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
-    const response = await api.post('/auth/login', credentials);
+    const response = await axios.post(`${API_BASE_URL}/auth/login`, credentials);
     return response.data;
   },
 
-  signup: async (signupData: SignupData): Promise<AuthResponse> => {
-    const response = await api.post('/auth/signup', signupData);
+  signup: async (data: SignupData): Promise<AuthResponse> => {
+    const response = await axios.post(`${API_BASE_URL}/auth/register`, data);
     return response.data;
   },
 
-  logout: async (): Promise<void> => {
-    await api.post('/auth/logout');
-  },
-
-  verifyEmail: async (verificationCode: string): Promise<{ user: any }> => {
-    const response = await api.post('/auth/verify-email', { code: verificationCode });
+  verifyEmail: async (token: string): Promise<{ success: boolean; message: string }> => {
+    const response = await axios.post(`${API_BASE_URL}/auth/verify-email`, { token });
     return response.data;
   },
 
-  forgotPassword: async (email: string): Promise<{ message: string }> => {
-    const response = await api.post('/auth/forgot-password', { email });
+  forgotPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
+    const response = await axios.post(`${API_BASE_URL}/auth/forgot-password`, { email });
     return response.data;
   },
 
-  resetPassword: async (token: string, newPassword: string): Promise<{ message: string }> => {
-    const response = await api.post('/auth/reset-password', { token, newPassword });
-    return response.data;
-  },
-
-  continueAsGuest: async (): Promise<{ guestToken: string }> => {
-    const response = await api.post('/auth/guest');
+  resetPassword: async (token: string, password: string): Promise<{ success: boolean; message: string }> => {
+    const response = await axios.post(`${API_BASE_URL}/auth/reset-password`, { token, password });
     return response.data;
   },
 };

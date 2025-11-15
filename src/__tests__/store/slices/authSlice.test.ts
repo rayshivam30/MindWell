@@ -10,7 +10,7 @@ import authReducer, {
 import { AuthState } from '../../types/auth';
 
 // Mock the authAPI
-jest.mock('../../services/authAPI', () => ({
+jest.mock('../../../services/authAPI', () => ({
   authAPI: {
     login: jest.fn(),
     signup: jest.fn(),
