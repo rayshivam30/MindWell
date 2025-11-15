@@ -1,32 +1,30 @@
 module.exports = {
   root: true,
   extends: [
-    '@react-native-community',
-    '@typescript-eslint/recommended',
-    'plugin:react/recommended',
-    'plugin:react-native/all',
+    'eslint:recommended',
   ],
   parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint', 'react', 'react-native'],
+  plugins: ['@typescript-eslint'],
   parserOptions: {
-    ecmaFeatures: {
-      jsx: true,
-    },
     ecmaVersion: 2020,
     sourceType: 'module',
   },
   rules: {
-    '@typescript-eslint/no-unused-vars': 'error',
-    '@typescript-eslint/explicit-function-return-type': 'off',
-    '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-explicit-any': 'warn',
-    'react/prop-types': 'off',
-    'react-native/no-inline-styles': 'warn',
-    'react-native/no-color-literals': 'warn',
+    'no-unused-vars': 'off',
+    '@typescript-eslint/no-unused-vars': 'warn',
+    'no-console': 'warn',
   },
-  settings: {
-    react: {
-      version: 'detect',
+  env: {
+    node: true,
+    es6: true,
+    jest: true,
+  },
+  overrides: [
+    {
+      files: ['**/__tests__/**/*', '**/*.test.*'],
+      env: {
+        jest: true,
+      },
     },
-  },
+  ],
 };

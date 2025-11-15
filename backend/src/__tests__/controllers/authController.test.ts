@@ -1,7 +1,35 @@
+// Mock Firebase Admin before importing controllers
+jest.mock('firebase-admin', () => ({
+  auth: () => ({
+    createUser: jest.fn().mockResolvedValue({ uid: 'test-uid' }),
+    getUserByEmail: jest.fn().mockRejectedValue({ code: 'auth/user-not-found' }),
+    generateEmailVerificationLink: jest.fn().mockResolvedValue('http://test-link.com'),
+  }),
+  firestore: () => ({
+    collection: jest.fn().mockReturnThis(),
+    doc: jest.fn().mockReturnThis(),
+    set: jest.fn().mockResolvedValue({}),
+    get: jest.fn().mockResolvedValue({ exists: false }),
+  }),
+}));
+
+// Mock other dependencies
+jest.mock('../../config/redis', () => ({
+  redisUtils: {
+    setWithExpiry: jest.fn(),
+    get: jest.fn(),
+    delete: jest.fn(),
+  },
+}));
+
+jest.mock('../../services/emailService', () => ({
+  sendVerificationEmail: jest.fn().mockResolvedValue(true),
+}));
+
 import request from 'supertest';
 import express from 'express';
-import { register, login, verifyEmail } from '../controllers/authController';
-import { validateRequest } from '../middleware/validateRequest';
+import { register, login, verifyEmail } from '../../controllers/authController';
+import { validateRequest } from '../../middleware/validateRequest';
 import { body } from 'express-validator';
 
 // Create test app

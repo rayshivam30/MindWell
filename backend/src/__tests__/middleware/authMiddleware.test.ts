@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { authMiddleware, requireUserType } from '../middleware/authMiddleware';
-import { redisUtils } from '../config/redis';
+import { authMiddleware, requireUserType } from '../../middleware/authMiddleware';
+import { redisUtils } from '../../config/redis';
 
 // Mock dependencies
 jest.mock('jsonwebtoken');
-jest.mock('../config/redis');
+jest.mock('../../config/redis');
 
 const mockJwt = jwt as jest.Mocked<typeof jwt>;
 const mockRedisUtils = redisUtils as jest.Mocked<typeof redisUtils>;
